@@ -30,7 +30,6 @@ module Program =
                     BootstrapServers = server,
                     GroupId = "orchestrator-consumer",
                     AutoOffsetReset = AutoOffsetReset.Earliest,
-
                     EnableAutoCommit = true
                 )
 
