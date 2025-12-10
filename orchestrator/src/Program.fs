@@ -2,11 +2,14 @@ namespace Orchestrator
 
 open System
 open System.Collections.Generic
+open System.Data
 open System.Linq
 open System.Threading.Tasks
+open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Confluent.Kafka
+open Npgsql
 
 module Program =
 
@@ -15,9 +18,11 @@ module Program =
         let builder = Host.CreateApplicationBuilder(args)
 
         let server = builder.Configuration.["Kafka:BootstrapServer"]
+        let topics = builder.Configuration.GetSection("Kafka:Topics").Get<string array>()
 
-        (* TODO: Read from appsettings *)
-        let topics = [| "orders"; "inventory" |]
+        let connectionString = builder.Configuration.GetConnectionString "Default"
+        let dataSource = NpgsqlDataSource.Create connectionString
+        let connection = dataSource.CreateConnection()
 
         let producer (server: string) =
             let config = ProducerConfig(BootstrapServers = server)
@@ -41,8 +46,8 @@ module Program =
 
         (* TODO: Composition root *)
         builder.Services.AddSingleton(producer server) |> ignore
-
         builder.Services.AddSingleton(consumer server topics) |> ignore
+        builder.Services.AddSingleton<IDbConnection> connection |> ignore
 
         builder.Services.AddHostedService<Worker>() |> ignore
 

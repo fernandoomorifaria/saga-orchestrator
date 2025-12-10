@@ -2,6 +2,7 @@ namespace Orchestrator
 
 open System
 open System.Collections.Generic
+open System.Data
 open System.Text.Json
 open System.Text.Json.Serialization
 open System.Linq
@@ -10,33 +11,15 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Confluent.Kafka
+open Types
 
-type Order =
-    { [<JsonPropertyName("orderId")>]
-      OrderId: Guid
-
-      [<JsonPropertyName("customerId")>]
-      CustomerId: int
-
-      [<JsonPropertyName("productId")>]
-      ProductId: int
-
-      [<JsonPropertyName("amount")>]
-      Amount: decimal }
-
-(* TODO: Add state field *)
-(* TODO: Use ADT *)
-type SagaMessage =
-    { [<JsonPropertyName("sagaId")>]
-      SagaId: Guid
-
-      [<JsonPropertyName("type")>]
-      Type: string
-
-      [<JsonPropertyName("order")>]
-      Order: Order }
-
-type Worker(producer: IProducer<string, string>, consumer: IConsumer<string, string>, logger: ILogger<Worker>) =
+type Worker
+    (
+        producer: IProducer<string, string>,
+        consumer: IConsumer<string, string>,
+        connection: IDbConnection,
+        logger: ILogger<Worker>
+    ) =
     inherit BackgroundService()
 
     let publish (topic: string) (message: SagaMessage) =
@@ -56,14 +39,19 @@ type Worker(producer: IProducer<string, string>, consumer: IConsumer<string, str
 
             logger.LogInformation("Order {id} received", order.OrderId)
 
-            (* TODO: Start SAGA state and store in database *)
             let sagaId = Guid.NewGuid()
 
-            let key = order.OrderId.ToString()
+            let saga =
+                { SagaId = sagaId
+                  State = "Pending"
+                  Order = order }
+
+            do! Database.create connection saga
 
             let command =
                 { SagaId = sagaId
-                  Type = "ReserveInventory"
+                  State = saga.State
+                  Type = "ReserveInvetory"
                   Order = order }
 
             (* TODO: Move to it's own function *)

@@ -1,0 +1,8 @@
+CREATE TABLE saga (
+    id SERIAL PRIMARY KEY,
+    saga_id UUID NOT NULL,
+    state VARCHAR(255) NOT NULL,
+    "order" JSONB NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    last_updated_at TIMESTAMP WITHOUT TIME ZONE
+);
