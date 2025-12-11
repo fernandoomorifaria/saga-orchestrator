@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { productsTable } from './db/schema.ts';
 import { KafkaJS } from '@confluentinc/kafka-javascript';
-import { eq, sql } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
 
 const db = drizzle(process.env.DATABASE_URL);
 
@@ -22,62 +22,81 @@ await consumer.connect();
 
 await consumer.subscribe({ topics: [topic] });
 
-interface Order {
-  orderId: string;
-  customerId: number;
-  productId: number;
-  amount: number;
+interface ReserveInventoryCommand {
+  sagaId: string;
+  orderId: string
+  type: string
+  productId: number
 }
 
-interface SagaMessage {
+interface Compensate {
+
+}
+
+interface Event {
   sagaId: string;
-  state: string;
+  orderId: string;
   type: string;
-  order: Order;
+  success: boolean;
 }
 
 await consumer.run({
   eachMessage: async ({ topic, partition, message }) => {
-    const sagaMessage: SagaMessage = JSON.parse(message.value.toString());
-    const orderId = sagaMessage.order.orderId;
-    const productId = sagaMessage.order.productId;
+    if (topic === 'inventory') {
+      const command: ReserveInventoryCommand = JSON.parse(message.value.toString());
+      const orderId = command.orderId;
+      const productId = command.productId;
 
-    if (sagaMessage.type === 'ReserveInventory') {
-      const [result] = await db
-        .select({ quantity: productsTable.quantity })
-        .from(productsTable)
-        .where(eq(productsTable.id, productId))
-        .limit(1);
+      if (command.type === 'ReserveInventory') {
+        const [result] = await db
+          .select({ quantity: productsTable.quantity })
+          .from(productsTable)
+          .where(eq(productsTable.id, productId))
+          .limit(1);
 
-      if (result.quantity > 0) {
-        await db.update(productsTable)
-          .set({ quantity: sql`${productsTable.quantity} - 1` })
-          .where(eq(productsTable.id, productId));
+        if (result.quantity > 0) {
+          await db.update(productsTable)
+            .set({ quantity: sql`${productsTable.quantity} - 1` })
+            .where(eq(productsTable.id, productId));
 
-        sagaMessage.type = 'InventoryReserved';
+          let event: Event = {
+            sagaId: command.sagaId,
+            orderId: orderId,
+            type: 'InventoryReserved',
+            success: true
+          }
 
-        await producer.send({
-          topic: 'orchestrator',
-          messages: [
-            {
-              key: orderId,
-              value: JSON.stringify(sagaMessage)
-            }
-          ]
-        })
-      } else {
-        sagaMessage.type = 'OutOfStock';
+          await producer.send({
+            topic: process.env.KAFKA_REPLY_TOPIC,
+            messages: [
+              {
+                key: orderId,
+                value: JSON.stringify(event)
+              }
+            ]
+          })
+        } else {
+          let event: Event = {
+            sagaId: command.sagaId,
+            orderId: orderId,
+            type: 'OutOfStock',
+            success: false
+          }
 
-        await producer.send({
-          topic: 'orchestrator',
-          messages: [
-            {
-              key: orderId,
-              value: JSON.stringify(sagaMessage)
-            }
-          ]
-        });
+          await producer.send({
+            topic: process.env.KAFKA_REPLY_TOPIC,
+            messages: [
+              {
+                key: orderId,
+                value: JSON.stringify(event)
+              }
+            ]
+          });
+        }
       }
+    }
+    else if (topic === 'compensate') {
+
     }
   }
 });

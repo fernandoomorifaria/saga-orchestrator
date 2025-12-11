@@ -3,36 +3,25 @@ module Orders.App
 open System
 open System.Text.Json
 open Microsoft.AspNetCore.Builder
-open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Confluent.Kafka
 open Giraffe
+open Npgsql
+open Database
+open Handlers
 open Types
-
-let createOrderHandler (startSaga: StartSaga) : HttpHandler =
-    fun (next: HttpFunc) (ctx: HttpContext) ->
-        task {
-            let! request = ctx.BindJsonAsync<CreateOrderRequest>()
-
-            let orderId = Guid.NewGuid()
-
-            let command =
-                { OrderId = orderId
-                  CustomerId = request.CustomerId
-                  ProductId = request.ProductId
-                  Amount = request.Amount }
-
-            do! startSaga command
-
-            ctx.SetStatusCode 201
-
-            return! next ctx
-        }
 
 let webApp (environment: Environment) =
     choose
-        [ POST >=> choose [ route "/order" >=> createOrderHandler environment.StartSaga ]
+        [ GET >=> choose [ routef "/order/%O" (getOrderHandler environment.GetOrder) ]
+
+          POST
+          >=> choose
+                  [ route "/order"
+                    >=> createOrderHandler environment.CreateOrder environment.StartSaga ]
+
           setStatusCode 404 >=> text "Not Found" ]
 
 module CompositionRoot =
@@ -41,6 +30,16 @@ module CompositionRoot =
         let config = ProducerConfig(BootstrapServers = server)
 
         ProducerBuilder<string, string>(config).Build()
+
+    let private createConsumer (configuration: IConfiguration) =
+        let server = configuration.["Kafka:Bootstrap"]
+        let config = ConsumerConfig(BootstrapServers = server, GroupId = "order-consumer")
+
+        let consumer = ConsumerBuilder<string, string>(config).Build()
+
+        consumer.Subscribe [| "orders-replies" |]
+
+        consumer
 
     let private createStartSaga (configuration: IConfiguration) (producer: IProducer<string, string>) =
         let topic = configuration.["Kafka:Topic"]
@@ -58,10 +57,20 @@ module CompositionRoot =
             }
 
     let compose (configuration: IConfiguration) : Environment =
+        let connectionString = configuration.GetConnectionString "Default"
+        let dataSource = NpgsqlDataSource.Create connectionString
+        let connection = dataSource.CreateConnection()
+
         let producer = createProducer configuration
+        let consumer = createConsumer configuration
+
         let StartSaga = createStartSaga configuration producer
 
-        { StartSaga = StartSaga }
+        { Consumer = consumer
+          StartSaga = StartSaga
+          GetOrder = get connection
+          CreateOrder = create connection
+          UpdateOrder = update connection }
 
 [<EntryPoint>]
 let main args =
@@ -72,6 +81,8 @@ let main args =
     let app = builder.Build()
 
     let environment = CompositionRoot.compose builder.Configuration
+
+    builder.Services.AddHostedService(fun _ -> Worker environment) |> ignore
 
     app.UseGiraffe(webApp environment)
     app.Run()
