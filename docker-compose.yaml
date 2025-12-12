@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: apache/kafka-native
+    image: apache/kafka
     container_name: kafka
     ports:
       - "9092:9092"
@@ -18,6 +18,15 @@ services:
 
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    volumes:
+      - ./check-topics.sh:/check-topics.sh
+    # This is the worst way to initialize topics
+    healthcheck:
+      test: ["CMD", "bash", "/check-topics.sh"]
+      interval: 60s
+      timeout: 60s
+      retries: 1
+      start_period: 20s
   orders-db:
     image: postgres:18-alpine
     container_name: orders-db
@@ -62,16 +71,22 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:5000
     depends_on:
-      - kafka
+      - orchestrator
+      - orders-db
   orchestrator:
     build:
       context: ./orchestrator/
     container_name: orchestrator
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+      orchestrator-db:
+        condition: service_started
   inventory:
     build:
       context: ./inventory/
     container_name: inventory
+    env_file: ./inventory/.env
     depends_on:
-      - kafka
+      - orchestrator
+      - inventory-db

@@ -5,5 +5,5 @@ CREATE TABLE saga (
     current_step INTEGER NOT NULL,
     "order" JSONB NOT NULL,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    last_updated_at TIMESTAMP WITHOUT TIME ZONE
+    last_updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );

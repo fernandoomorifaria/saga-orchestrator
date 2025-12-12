@@ -6,6 +6,6 @@ CREATE TABLE orders (
     product_id INTEGER NOT NULL,
     amount NUMERIC(18, 2) NOT NULL,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    last_updated_at TIMESTAMP WITHOUT TIME ZONE
+    last_updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
