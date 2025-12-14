@@ -10,6 +10,8 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Confluent.Kafka
 open Npgsql
+open Dapper
+open Types
 
 module Program =
 

@@ -6,13 +6,12 @@ count=$(/opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092 
 
 if [ "$count" -le 1 ]; then
   topics=(
-    "orders"
+    "order-requests"
     "order-replies"
-    "orchestrator"
     "inventory"
     "inventory-replies"
     "payments"
-    "payments-replies"
+    "payment-replies"
   )
 
   for topic in "${topics[@]}"; do

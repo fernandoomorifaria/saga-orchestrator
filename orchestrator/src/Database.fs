@@ -2,10 +2,10 @@ module Database
 
 open System
 open System.Data
-open System.Text.Json
 open System.Threading.Tasks
 open Dapper
 open Types
+open Thoth.Json.Net
 
 let get (connection: IDbConnection) (sagaId: Guid) : Task<Saga option> =
     task {
@@ -15,7 +15,6 @@ let get (connection: IDbConnection) (sagaId: Guid) : Task<Saga option> =
                 id AS "Id",
                 saga_id AS "SagaId",
                 state AS "State",
-                current_step AS "CurrentStep",
                 "order"::text AS "Order",
                 created_at AS "CreatedAt",
                 last_updated_at AS "LastUpdatedAt"
@@ -25,16 +24,21 @@ let get (connection: IDbConnection) (sagaId: Guid) : Task<Saga option> =
 
         let! saga = connection.QuerySingleOrDefaultAsync<SagaEntity>(sql, {| sagaId = sagaId |})
 
-        (* NOTE: I know, this looks bad *)
         match box saga with
         | null -> return None
         | _ ->
-            return
-                Some
-                    { SagaId = saga.SagaId
-                      State = saga.State
-                      CurrentStep = saga.CurrentStep
-                      Order = JsonSerializer.Deserialize<Order> saga.Order }
+            let order = Decode.fromString Decode.order saga.Order
+            let state = Decode.fromString Decode.state saga.State
+
+            match order, state with
+            | Ok order, Ok state ->
+                return
+                    Some
+                        { SagaId = saga.SagaId
+                          State = state
+                          Order = order }
+            | Error err, _ -> return failwith $"Failed to decode order: {err}"
+            | _, Error err -> return failwith $"Failed to decode state: {err}"
     }
 
 let create (connection: IDbConnection) (saga: Saga) =
@@ -44,13 +48,11 @@ let create (connection: IDbConnection) (saga: Saga) =
             INSERT INTO saga (
                 saga_id,
                 state,
-                current_step,
                 "order"
             )
             VALUES (
                 @sagaId,
                 @state,
-                @currentStep,
                 @order::jsonb
             );
             """
@@ -59,9 +61,8 @@ let create (connection: IDbConnection) (saga: Saga) =
             connection.ExecuteAsync(
                 sql,
                 {| sagaId = saga.SagaId
-                   state = saga.State
-                   currentStep = saga.CurrentStep
-                   order = JsonSerializer.Serialize saga.Order |}
+                   state = Encode.state saga.State |> Encode.toString 4
+                   order = Encode.order saga.Order |> Encode.toString 4 |}
             )
 
         ()
@@ -74,7 +75,6 @@ let update (connection: IDbConnection) (saga: Saga) =
             UPDATE saga
             SET
                 state = @state,
-                current_step = @currentStep,
                 "order" = @order::jsonb,
                 last_updated_at = NOW()
             WHERE
@@ -85,9 +85,8 @@ let update (connection: IDbConnection) (saga: Saga) =
             connection.ExecuteAsync(
                 sql,
                 {| sagaId = saga.SagaId
-                   state = saga.State
-                   currentStep = saga.CurrentStep
-                   order = JsonSerializer.Serialize saga.Order |}
+                   state = Encode.state saga.State |> Encode.toString 4
+                   order = Encode.order saga.Order |> Encode.toString 4 |}
             )
 
         ()

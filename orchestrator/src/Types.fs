@@ -1,74 +1,69 @@
 module Types
 
 open System
-open System.Text.Json.Serialization
 
 type Order =
-    { [<JsonPropertyName("orderId")>]
-      OrderId: Guid
-
-      [<JsonPropertyName("customerId")>]
+    { OrderId: Guid
       CustomerId: int
-
-      [<JsonPropertyName("productId")>]
       ProductId: int
-
-      [<JsonPropertyName("amount")>]
       Amount: decimal }
+
+type State =
+    | Pending
+    | Completed
+    | Failed
 
 type Saga =
     { SagaId: Guid
-      State: string
-      CurrentStep: int
+      State: State
       Order: Order }
-
-type SagaStep =
-    { Name: string
-      CommandTopic: string
-      ReplyTopic: string
-      CompensationCommand: string }
 
 type SagaEntity =
     { Id: int
       SagaId: Guid
       State: string
-      CurrentStep: int
       Order: string
       CreatedAt: DateTime
-      LastUpdatedAt: DateTime option }
+      LastUpdatedAt: DateTime }
 
-type Event =
-    { [<JsonPropertyName("sagaId")>]
-      SagaId: Guid
-      [<JsonPropertyName("orderId")>]
+type ReplyType =
+    | InventoryReserved
+    | OutOfStock
+    | InventoryReleased
+    | PaymentProcessed
+    | InsufficientFunds
+
+type Reply =
+    { SagaId: Guid
       OrderId: Guid
-      [<JsonPropertyName("type")>]
-      Type: string
-      [<JsonPropertyName("success")>]
-      Success: bool }
+      Type: ReplyType }
 
 type ReserveInventoryCommand =
-    { [<JsonPropertyName("sagaId")>]
-      SagaId: Guid
-      [<JsonPropertyName("orderId")>]
+    { SagaId: Guid
       OrderId: Guid
-      [<JsonPropertyName("type")>]
       Type: string
-      [<JsonPropertyName("productId")>]
+      ProductId: int }
+
+type ReleaseInventoryCommand =
+    { SagaId: Guid
+      OrderId: Guid
+      Type: string
       ProductId: int }
 
 type ProcessPaymentCommand =
-    { [<JsonPropertyName("sagaId")>]
-      SagaId: Guid
-      [<JsonPropertyName("orderId")>]
+    { SagaId: Guid
       OrderId: Guid
-      [<JsonPropertyName("type")>]
       Type: string
-      [<JsonPropertyName("customerId")>]
       CustomerId: int
-      [<JsonPropertyName("amount")>]
       Amount: decimal }
 
 type Command =
     | ReserveInventory of ReserveInventoryCommand
+    | ReleaseInventory of ReleaseInventoryCommand
     | ProcessPayment of ProcessPaymentCommand
+
+type OrderStatus =
+    | Placed
+    | Cancelled
+
+type OrderEvent = { OrderId: Guid; Status: OrderStatus }

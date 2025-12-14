@@ -3,8 +3,6 @@ namespace Orchestrator
 open System
 open System.Collections.Generic
 open System.Data
-open System.Text.Json
-open System.Text.Json.Serialization
 open System.Linq
 open System.Threading
 open System.Threading.Tasks
@@ -12,6 +10,7 @@ open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Confluent.Kafka
 open Types
+open Thoth.Json.Net
 
 type Worker
     (
@@ -22,105 +21,139 @@ type Worker
     ) =
     inherit BackgroundService()
 
-    let publish (topic: string) (key: string) message =
+    let publish (topic: string) (key: string) (message: string) =
         task {
-            let json = JsonSerializer.Serialize message
+            logger.LogInformation("Publishing {} to {topic}", message, topic)
 
-            let! _ = producer.ProduceAsync(topic, Message<string, string>(Key = key, Value = json))
+            let! _ = producer.ProduceAsync(topic, Message<string, string>(Key = key, Value = message))
 
             ()
         }
-    (* NOTE: Maybe the old way was better *)
-    let steps: SagaStep array =
-        [| { Name = "ReserveInventory"
-             CommandTopic = "inventory"
-             ReplyTopic = "inventory-replies"
-             CompensationCommand = "ReleaseInventory" }
-           { Name = "ProcessPayment"
-             CommandTopic = "payments"
-             ReplyTopic = "payments-replies"
-             CompensationCommand = "RefundPayment" } |]
 
-    let completeSaga (saga: Saga) = task { }
-
-    (* NOTE: Is there a better way to use ADT here? *)
-    let getCommand (command: string) (saga: Saga) : Command =
-        match command with
-        | "ReserveInventory" ->
-            ReserveInventory
-                { SagaId = saga.SagaId
-                  OrderId = saga.Order.OrderId
-                  Type = "ReserveInventory"
-                  ProductId = saga.Order.ProductId }
-        | "ProcessPayment" ->
-            ProcessPayment
-                { SagaId = saga.SagaId
-                  OrderId = saga.Order.OrderId
-                  Type = "ProcessPayment"
-                  CustomerId = saga.Order.CustomerId
-                  Amount = saga.Order.Amount }
-
-    (* NOTE: If event success is false call compensate instead of transition *)
-    let transition (saga: Saga) =
+    let complete (saga: Saga) =
         task {
-            if saga.CurrentStep >= steps.Length then
-                do! completeSaga saga
-            else
-                let step = steps.[saga.CurrentStep]
+            do! Database.update connection { saga with State = Completed }
 
-                let command = getCommand step.Name saga
+        (*
+            let key = saga.Order.OrderId.ToString()
 
-                do! publish step.CommandTopic (saga.SagaId.ToString()) command
+            let event =
+                { OrderId = saga.Order.OrderId
+                  Status = Placed }
 
-                ()
+            do! publish "order-replies" key event *)
         }
 
-    let handleReply (event: Event) =
+    let fail (saga: Saga) =
         task {
-            let! saga = Database.get connection event.SagaId
+            do! Database.update connection { saga with State = Failed }
+
+        (*
+            let key = saga.Order.OrderId.ToString()
+
+            let event =
+                { OrderId = saga.Order.OrderId
+                  Status = Cancelled }
+
+            do! publish "order-replies" key event *)
+        }
+
+    let processPayment (saga: Saga) =
+        task {
+            let key = saga.Order.OrderId.ToString()
+
+            let command =
+                ProcessPayment
+                    { SagaId = saga.SagaId
+                      OrderId = saga.Order.OrderId
+                      CustomerId = saga.Order.CustomerId
+                      Amount = saga.Order.Amount
+                      Type = "payment.process" }
+
+            do! publish "payments" key (Encode.command command |> Encode.toString 4)
+        }
+
+    let releaseInventory (saga: Saga) =
+        task {
+            let key = saga.Order.OrderId.ToString()
+            let order = saga.Order
+
+            let command =
+                ReleaseInventory
+                    { SagaId = saga.SagaId
+                      OrderId = order.OrderId
+                      ProductId = order.ProductId
+                      Type = "inventory.release" }
+
+            do! publish "inventory" key (Encode.command command |> Encode.toString 4)
+        }
+
+    let handleReply (reply: Reply) =
+        task {
+            logger.LogInformation "Getting saga for reply"
+
+            let! saga = Database.get connection reply.SagaId
 
             match saga with
             | None -> ()
             | Some saga ->
-                if event.Success = true then
-                    let next =
-                        { saga with
-                            CurrentStep = saga.CurrentStep + 1 }
-
-                    do! Database.update connection next
-
-                    do! transition next
-                else
-                    (* TODO: Compensate *)
-                    ()
+                match reply.Type with
+                | InventoryReserved -> do! processPayment saga
+                | OutOfStock -> do! fail saga
+                | InventoryReleased -> do! fail saga
+                | PaymentProcessed -> do! complete saga
+                | InsufficientFunds -> do! releaseInventory saga
         }
 
     let startSaga (order: Order) =
         task {
-            logger.LogInformation("Order {id} received", order.OrderId)
-
             let sagaId = Guid.NewGuid()
 
             let saga =
                 { SagaId = sagaId
-                  State = "Pending"
-                  CurrentStep = 0
+                  State = Pending
                   Order = order }
+
+            logger.LogInformation "Creating Saga"
 
             do! Database.create connection saga
 
-            do! transition saga
+            let order = saga.Order
+
+            let command =
+                ReserveInventory
+                    { SagaId = saga.SagaId
+                      OrderId = order.OrderId
+                      ProductId = order.ProductId
+                      Type = "inventory.reserve" }
+
+            let key = order.OrderId.ToString()
+
+            logger.LogInformation("Starting Saga {sagaId}", saga.SagaId)
+
+            do! publish "inventory" key (Encode.command command |> Encode.toString 4)
         }
 
     let handleMessage (topic: string) (message: string) =
         task {
-            if topic = "orders" then
-                let order = JsonSerializer.Deserialize<Order> message
-                do! startSaga order
-            else
-                let event = JsonSerializer.Deserialize<Event> message
+            if topic = "order-requests" then
+                let order = Decode.fromString Decode.order message
 
-                do! handleReply event
+                match order with
+                | Ok order ->
+                    logger.LogInformation("Order {id} received", order.OrderId)
+
+                    do! startSaga order
+                | Error e -> logger.LogInformation e
+            else
+                let reply = Decode.fromString Decode.reply message
+
+                match reply with
+                | Ok reply ->
+                    logger.LogInformation("Received {type} reply", reply.Type)
+
+                    do! handleReply reply
+                | Error e -> logger.LogInformation e
         }
 
     override _.ExecuteAsync(ct: CancellationToken) =
@@ -128,7 +161,9 @@ type Worker
             while not ct.IsCancellationRequested do
                 logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now)
 
-                let result = consumer.Consume(ct)
+                let result = consumer.Consume ct
+
+                logger.LogInformation("Message received {message}", result.Message.Value)
 
                 handleMessage result.Topic result.Message.Value |> ignore
         }

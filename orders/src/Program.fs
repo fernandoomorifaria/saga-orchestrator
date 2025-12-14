@@ -32,18 +32,16 @@ module CompositionRoot =
         ProducerBuilder<string, string>(config).Build()
 
     let private createConsumer (configuration: IConfiguration) =
-        let server = configuration.["Kafka:Bootstrap"]
+        let server = configuration.["Kafka:BootstrapServer"]
         let config = ConsumerConfig(BootstrapServers = server, GroupId = "order-consumer")
 
         let consumer = ConsumerBuilder<string, string>(config).Build()
 
-        consumer.Subscribe [| "orders-replies" |]
+        consumer.Subscribe [| "order-replies" |]
 
         consumer
 
     let private createStartSaga (configuration: IConfiguration) (producer: IProducer<string, string>) =
-        let topic = configuration.["Kafka:Topic"]
-
         fun (command: CreateOrderCommand) ->
             task {
                 let key = command.OrderId.ToString()
@@ -51,7 +49,7 @@ module CompositionRoot =
 
                 let message = Message<string, string>(Key = key, Value = json)
 
-                let! _ = producer.ProduceAsync(topic, message)
+                let! _ = producer.ProduceAsync("order-requests", message)
 
                 ()
             }
@@ -76,13 +74,12 @@ module CompositionRoot =
 let main args =
     let builder = WebApplication.CreateBuilder args
 
-    builder.Services.AddGiraffe() |> ignore
-
-    let app = builder.Build()
-
     let environment = CompositionRoot.compose builder.Configuration
 
     builder.Services.AddHostedService(fun _ -> Worker environment) |> ignore
+    builder.Services.AddGiraffe() |> ignore
+
+    let app = builder.Build()
 
     app.UseGiraffe(webApp environment)
     app.Run()
