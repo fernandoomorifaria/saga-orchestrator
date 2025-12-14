@@ -1,6 +1,3 @@
--- So, I had this idea to use database enums but sum types don't play well with it and there's no easy way to handle this
--- CREATE TYPE state AS ENUM ('pending', 'completed', 'failed');
-
 CREATE TABLE saga (
     id SERIAL PRIMARY KEY,
     saga_id UUID NOT NULL,

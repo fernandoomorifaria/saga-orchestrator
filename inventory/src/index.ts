@@ -30,7 +30,7 @@ interface InventoryCommand {
   productId: number
 }
 
-interface Event {
+interface Reply {
   sagaId: string;
   orderId: string;
   type: string;
@@ -38,71 +38,69 @@ interface Event {
 
 await consumer.run({
   eachMessage: async ({ topic, partition, message }) => {
-    if (topic === 'inventory') {
-      const command: InventoryCommand = JSON.parse(message.value.toString());
-      const orderId = command.orderId;
-      const productId = command.productId;
+    const command: InventoryCommand = JSON.parse(message.value.toString());
+    const orderId = command.orderId;
+    const productId = command.productId;
 
-      const event: Event = {
-        sagaId: command.sagaId,
-        orderId: orderId,
-        type: ''
-      }
+    const reply: Reply = {
+      sagaId: command.sagaId,
+      orderId: orderId,
+      type: ''
+    }
 
-      if (command.type === 'inventory.reserve') {
-        const [result] = await db
-          .select({ quantity: productsTable.quantity })
-          .from(productsTable)
-          .where(eq(productsTable.id, productId))
-          .limit(1);
+    if (command.type === 'inventory.reserve') {
+      const [result] = await db
+        .select({ quantity: productsTable.quantity })
+        .from(productsTable)
+        .where(eq(productsTable.id, productId))
+        .limit(1);
 
-        if (result.quantity > 0) {
-          await db.update(productsTable)
-            .set({ quantity: sql`${productsTable.quantity} - 1` })
-            .where(eq(productsTable.id, productId));
-
-          event.type = 'inventory.reserved';
-
-          await producer.send({
-            topic: replyTopic,
-            messages: [
-              {
-                key: orderId,
-                value: JSON.stringify(event)
-              }
-            ]
-          })
-        } else {
-          event.type = 'inventory.out_of_stock'
-
-          await producer.send({
-            topic: replyTopic,
-            messages: [
-              {
-                key: orderId,
-                value: JSON.stringify(event)
-              }
-            ]
-          });
-        }
-      }
-      if (command.type === 'inventory.release') {
+      if (result.quantity > 0) {
         await db.update(productsTable)
-          .set({ quantity: sql`${productsTable.quantity} + 1` })
+          .set({ quantity: sql`${productsTable.quantity} - 1` })
           .where(eq(productsTable.id, productId));
 
-        event.type = 'inventory.released';
+        reply.type = 'inventory.reserved';
 
         await producer.send({
           topic: replyTopic,
           messages: [
             {
               key: orderId,
-              value: JSON.stringify(event)
+              value: JSON.stringify(reply)
             }
           ]
         })
+      } else {
+        reply.type = 'inventory.out_of_stock'
+
+        await producer.send({
+          topic: replyTopic,
+          messages: [
+            {
+              key: orderId,
+              value: JSON.stringify(reply)
+            }
+          ]
+        });
       }
+    }
+    if (command.type === 'inventory.release') {
+      await db.update(productsTable)
+        .set({ quantity: sql`${productsTable.quantity} + 1` })
+        .where(eq(productsTable.id, productId));
+
+      reply.type = 'inventory.released';
+
+      await producer.send({
+        topic: replyTopic,
+        messages: [
+          {
+            key: orderId,
+            value: JSON.stringify(reply)
+          }
+        ]
+      })
     }
   }
 });

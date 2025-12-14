@@ -56,12 +56,21 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: inventory
-    env_file:
-      "./inventory/.env"
     volumes:
       - ./inventory/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5434:5432"
+  payments-db:
+    image: postgres:18-alpine
+    container_name: payments-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: payments
+    volumes:
+      - ./payments/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5435:5432"
   orders:
     build:
       context: ./orders/
@@ -90,3 +99,10 @@ services:
     depends_on:
       - orchestrator
       - inventory-db
+  payments:
+    build:
+      context: ./payments/
+    container_name: payments
+    depends_on:
+      - orchestrator
+      - payments-db

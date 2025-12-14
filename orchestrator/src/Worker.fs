@@ -34,6 +34,8 @@ type Worker
         task {
             do! Database.update connection { saga with State = Completed }
 
+            logger.LogInformation("Saga {id} completed", saga.SagaId)
+
         (*
             let key = saga.Order.OrderId.ToString()
 
@@ -48,6 +50,7 @@ type Worker
         task {
             do! Database.update connection { saga with State = Failed }
 
+            logger.LogInformation("Saga {id} failed", saga.SagaId)
         (*
             let key = saga.Order.OrderId.ToString()
 

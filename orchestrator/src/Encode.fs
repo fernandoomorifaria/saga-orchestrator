@@ -10,20 +10,6 @@ let order (order: Order) =
           "productId", Encode.int order.ProductId
           "amount", Encode.decimal order.Amount ]
 
-let replyType (replyType: ReplyType) =
-    match replyType with
-    | InventoryReserved -> Encode.string "inventory.reserved"
-    | OutOfStock -> Encode.string "inventory.out_of_stock"
-    | InventoryReleased -> Encode.string "inventory.released"
-    | PaymentProcessed -> Encode.string "payments.processed"
-    | InsufficientFunds -> Encode.string "payments.insufficient_funds"
-
-let reply (reply: Reply) =
-    Encode.object
-        [ "sagaId", Encode.guid reply.SagaId
-          "orderId", Encode.guid reply.OrderId
-          "type", replyType reply.Type ]
-
 let reserveInventory (command: ReserveInventoryCommand) =
     Encode.object
         [ "sagaId", Encode.guid command.SagaId
