@@ -68,7 +68,7 @@ let update (connection: IDbConnection) (order: Order) =
                 state = @state,
                 customer_id = @customerId,
                 product_id = @productId,
-                amount = @amount
+                amount = @amount,
                 last_updated_at = NOW()
             WHERE order_id = @orderId;
             """

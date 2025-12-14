@@ -38,29 +38,34 @@ type Reply =
       OrderId: Guid
       Type: ReplyType }
 
+type CommandType =
+    | ReserveInventory
+    | ReleaseInventory
+    | ProcessPayment
+
 type ReserveInventoryCommand =
     { SagaId: Guid
       OrderId: Guid
-      Type: string
+      Type: CommandType
       ProductId: int }
 
 type ReleaseInventoryCommand =
     { SagaId: Guid
       OrderId: Guid
-      Type: string
+      Type: CommandType
       ProductId: int }
 
 type ProcessPaymentCommand =
     { SagaId: Guid
       OrderId: Guid
-      Type: string
+      Type: CommandType
       CustomerId: int
       Amount: decimal }
 
 type Command =
-    | ReserveInventory of ReserveInventoryCommand
-    | ReleaseInventory of ReleaseInventoryCommand
-    | ProcessPayment of ProcessPaymentCommand
+    | ReserveInventoryCommand of ReserveInventoryCommand
+    | ReleaseInventoryCommand of ReleaseInventoryCommand
+    | ProcessPaymentCommand of ProcessPaymentCommand
 
 type OrderStatus =
     | Placed

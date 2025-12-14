@@ -31,7 +31,7 @@ let createOrderHandler (createOrder: CreateOrder) (startSaga: StartSaga) : HttpH
 
             ctx.SetStatusCode 201
 
-            return! next ctx
+            return! text (orderId.ToString()) next ctx
         }
 
 let getOrderHandler (getOrder: GetOrder) (orderId: Guid) : HttpHandler =

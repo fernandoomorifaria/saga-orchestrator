@@ -1,8 +1,8 @@
 namespace Orders
 
-open System.Text.Json
 open System.Threading
 open Microsoft.Extensions.Hosting
+open Thoth.Json.Net
 open Types
 
 type Worker(environment: Environment) =
@@ -13,14 +13,19 @@ type Worker(environment: Environment) =
             while not ct.IsCancellationRequested do
                 let result = environment.Consumer.Consume ct
 
-                let event = JsonSerializer.Deserialize<Event> result.Message.Value
+                let event = Decode.fromString Decode.orderEvent result.Message.Value
 
-                if event.Type = "OrderPlaced" then
+                match event with
+                | Ok event ->
                     let! order = environment.GetOrder event.OrderId
 
-                    let update =
-                        { order.Value with
-                            State = "OrderPlaced" }
+                    match order with
+                    | Some order ->
+                        let status = Encode.status event.Status
 
-                    do! environment.UpdateOrder update
+                        let updatedOrder = { order with State = status }
+
+                        do! environment.UpdateOrder updatedOrder
+                    | None -> ()
+                | Error e -> ()
         }

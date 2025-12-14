@@ -1,21 +1,13 @@
 module Types
 
 open System
-open System.Text.Json.Serialization
 open System.Threading.Tasks
 open Confluent.Kafka
 
 type CreateOrderCommand =
-    { [<JsonPropertyName("orderId")>]
-      OrderId: Guid
-
-      [<JsonPropertyName("customerId")>]
+    { OrderId: Guid
       CustomerId: int
-
-      [<JsonPropertyName("productId")>]
       ProductId: int
-
-      [<JsonPropertyName("amount")>]
       Amount: decimal }
 
 type CreateOrderRequest =
@@ -45,12 +37,8 @@ type Environment =
       CreateOrder: CreateOrder
       UpdateOrder: UpdateOrder }
 
-type Event =
-    { [<JsonPropertyName("sagaId")>]
-      SagaId: Guid
-      [<JsonPropertyName("orderId")>]
-      OrderId: Guid
-      [<JsonPropertyName("type")>]
-      Type: string
-      [<JsonPropertyName("success")>]
-      Success: bool }
+type OrderStatus =
+    | Placed
+    | Cancelled
+
+type OrderEvent = { OrderId: Guid; Status: OrderStatus }

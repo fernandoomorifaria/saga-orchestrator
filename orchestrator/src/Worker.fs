@@ -36,14 +36,13 @@ type Worker
 
             logger.LogInformation("Saga {id} completed", saga.SagaId)
 
-        (*
             let key = saga.Order.OrderId.ToString()
 
             let event =
                 { OrderId = saga.Order.OrderId
                   Status = Placed }
 
-            do! publish "order-replies" key event *)
+            do! publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
         }
 
     let fail (saga: Saga) =
@@ -51,14 +50,14 @@ type Worker
             do! Database.update connection { saga with State = Failed }
 
             logger.LogInformation("Saga {id} failed", saga.SagaId)
-        (*
+
             let key = saga.Order.OrderId.ToString()
 
             let event =
                 { OrderId = saga.Order.OrderId
                   Status = Cancelled }
 
-            do! publish "order-replies" key event *)
+            do! publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
         }
 
     let processPayment (saga: Saga) =
@@ -66,12 +65,12 @@ type Worker
             let key = saga.Order.OrderId.ToString()
 
             let command =
-                ProcessPayment
+                ProcessPaymentCommand
                     { SagaId = saga.SagaId
                       OrderId = saga.Order.OrderId
                       CustomerId = saga.Order.CustomerId
                       Amount = saga.Order.Amount
-                      Type = "payment.process" }
+                      Type = ProcessPayment }
 
             do! publish "payments" key (Encode.command command |> Encode.toString 4)
         }
@@ -82,11 +81,11 @@ type Worker
             let order = saga.Order
 
             let command =
-                ReleaseInventory
+                ReleaseInventoryCommand
                     { SagaId = saga.SagaId
                       OrderId = order.OrderId
                       ProductId = order.ProductId
-                      Type = "inventory.release" }
+                      Type = ReleaseInventory }
 
             do! publish "inventory" key (Encode.command command |> Encode.toString 4)
         }
@@ -124,11 +123,11 @@ type Worker
             let order = saga.Order
 
             let command =
-                ReserveInventory
+                ReserveInventoryCommand
                     { SagaId = saga.SagaId
                       OrderId = order.OrderId
                       ProductId = order.ProductId
-                      Type = "inventory.reserve" }
+                      Type = ReserveInventory }
 
             let key = order.OrderId.ToString()
 

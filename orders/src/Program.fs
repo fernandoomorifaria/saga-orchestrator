@@ -11,6 +11,7 @@ open Giraffe
 open Npgsql
 open Database
 open Handlers
+open Thoth.Json.Net
 open Types
 
 let webApp (environment: Environment) =
@@ -45,7 +46,7 @@ module CompositionRoot =
         fun (command: CreateOrderCommand) ->
             task {
                 let key = command.OrderId.ToString()
-                let json = JsonSerializer.Serialize command
+                let json = Encode.createOrder command |> Encode.toString 4
 
                 let message = Message<string, string>(Key = key, Value = json)
 
