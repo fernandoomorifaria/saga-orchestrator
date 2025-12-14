@@ -1,44 +1,23 @@
 namespace Orchestrator
 
-open System
-open System.Collections.Generic
-open System.Data
-open System.Linq
-open System.Threading.Tasks
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Logging
 open Confluent.Kafka
 open Npgsql
-open Dapper
 open Types
 
 module Program =
-
-    [<EntryPoint>]
-    let main args =
-        let builder = Host.CreateApplicationBuilder(args)
-
-        let server = builder.Configuration.["Kafka:BootstrapServer"]
-        let topics = builder.Configuration.GetSection("Kafka:Topics").Get<string array>()
-
-        let connectionString = builder.Configuration.GetConnectionString "Default"
-        let dataSource = NpgsqlDataSource.Create connectionString
-        let connection = dataSource.CreateConnection()
-
-        let producer (server: string) =
+    module CompositionRoot =
+        let creatProducer (server: string) =
             let config = ProducerConfig(BootstrapServers = server)
 
             ProducerBuilder<string, string>(config).Build()
 
-        let consumer (server: string) (topics: string seq) =
+        let createConsumer (server: string) (topics: string seq) =
             let config =
-                ConsumerConfig(
-                    BootstrapServers = server,
-                    GroupId = "orchestrator-consumer",
-                    AutoOffsetReset = AutoOffsetReset.Earliest,
-                    EnableAutoCommit = true
-                )
+                ConsumerConfig(BootstrapServers = server, GroupId = "orchestrator-consumer")
 
             let consumer = ConsumerBuilder<string, string>(config).Build()
 
@@ -46,12 +25,47 @@ module Program =
 
             consumer
 
-        (* TODO: Composition root *)
-        builder.Services.AddSingleton(producer server) |> ignore
-        builder.Services.AddSingleton(consumer server topics) |> ignore
-        builder.Services.AddSingleton<IDbConnection> connection |> ignore
+        let compose (configuration: IConfiguration) : Environment =
+            let server = configuration.["Kafka:BootstrapServer"]
+            let topics = configuration.GetSection("Kafka:Topics").Get<string array>()
 
-        builder.Services.AddHostedService<Worker>() |> ignore
+            let connectionString = configuration.GetConnectionString "Default"
+            let dataSource = NpgsqlDataSource.Create connectionString
+            let connection = dataSource.CreateConnection()
+
+            let connectionString = configuration.GetConnectionString "Default"
+            let dataSource = NpgsqlDataSource.Create connectionString
+            let connection = dataSource.CreateConnection()
+
+            let producer = creatProducer server
+            let consumer = createConsumer server topics
+
+            let loggerFactory =
+                LoggerFactory.Create(fun builder -> builder.AddConsole() |> ignore)
+
+            let logger = loggerFactory.CreateLogger<Worker>()
+
+            let publish (topic: string) (key: string) (message: string) =
+                task {
+                    let! _ = producer.ProduceAsync(topic, Message<string, string>(Key = key, Value = message))
+
+                    ()
+                }
+
+            { Publish = publish
+              Consumer = consumer
+              Connection = connection
+              Logger = logger }
+
+
+
+    [<EntryPoint>]
+    let main args =
+        let builder = Host.CreateApplicationBuilder args
+
+        let environment = CompositionRoot.compose builder.Configuration
+
+        builder.Services.AddHostedService(fun _ -> new Worker(environment)) |> ignore
 
         builder.Build().Run()
 

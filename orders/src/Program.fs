@@ -1,7 +1,5 @@
 module Orders.App
 
-open System
-open System.Text.Json
 open Microsoft.AspNetCore.Builder
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
@@ -42,7 +40,7 @@ module CompositionRoot =
 
         consumer
 
-    let private createStartSaga (configuration: IConfiguration) (producer: IProducer<string, string>) =
+    let private createStartSaga (producer: IProducer<string, string>) =
         fun (command: CreateOrderCommand) ->
             task {
                 let key = command.OrderId.ToString()
@@ -63,7 +61,7 @@ module CompositionRoot =
         let producer = createProducer configuration
         let consumer = createConsumer configuration
 
-        let StartSaga = createStartSaga configuration producer
+        let StartSaga = createStartSaga producer
 
         { Consumer = consumer
           StartSaga = StartSaga
@@ -77,7 +75,7 @@ let main args =
 
     let environment = CompositionRoot.compose builder.Configuration
 
-    builder.Services.AddHostedService(fun _ -> Worker environment) |> ignore
+    builder.Services.AddHostedService(fun _ -> new Worker(environment)) |> ignore
     builder.Services.AddGiraffe() |> ignore
 
     let app = builder.Build()

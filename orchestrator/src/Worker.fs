@@ -1,40 +1,20 @@
 namespace Orchestrator
 
 open System
-open System.Collections.Generic
-open System.Data
-open System.Linq
 open System.Threading
-open System.Threading.Tasks
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
-open Confluent.Kafka
 open Types
 open Thoth.Json.Net
 
-type Worker
-    (
-        producer: IProducer<string, string>,
-        consumer: IConsumer<string, string>,
-        connection: IDbConnection,
-        logger: ILogger<Worker>
-    ) =
+type Worker(environment: Environment) =
     inherit BackgroundService()
-
-    let publish (topic: string) (key: string) (message: string) =
-        task {
-            logger.LogInformation("Publishing {} to {topic}", message, topic)
-
-            let! _ = producer.ProduceAsync(topic, Message<string, string>(Key = key, Value = message))
-
-            ()
-        }
 
     let complete (saga: Saga) =
         task {
-            do! Database.update connection { saga with State = Completed }
+            do! Database.update environment.Connection { saga with State = Completed }
 
-            logger.LogInformation("Saga {id} completed", saga.SagaId)
+            environment.Logger.LogInformation("Saga {id} completed", saga.SagaId)
 
             let key = saga.Order.OrderId.ToString()
 
@@ -42,14 +22,14 @@ type Worker
                 { OrderId = saga.Order.OrderId
                   Status = Placed }
 
-            do! publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
+            do! environment.Publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
         }
 
     let fail (saga: Saga) =
         task {
-            do! Database.update connection { saga with State = Failed }
+            do! Database.update environment.Connection { saga with State = Failed }
 
-            logger.LogInformation("Saga {id} failed", saga.SagaId)
+            environment.Logger.LogInformation("Saga {id} failed", saga.SagaId)
 
             let key = saga.Order.OrderId.ToString()
 
@@ -57,7 +37,7 @@ type Worker
                 { OrderId = saga.Order.OrderId
                   Status = Cancelled }
 
-            do! publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
+            do! environment.Publish "order-replies" key (Encode.orderEvent event |> Encode.toString 4)
         }
 
     let processPayment (saga: Saga) =
@@ -72,7 +52,7 @@ type Worker
                       Amount = saga.Order.Amount
                       Type = ProcessPayment }
 
-            do! publish "payments" key (Encode.command command |> Encode.toString 4)
+            do! environment.Publish "payments" key (Encode.command command |> Encode.toString 4)
         }
 
     let releaseInventory (saga: Saga) =
@@ -87,14 +67,14 @@ type Worker
                       ProductId = order.ProductId
                       Type = ReleaseInventory }
 
-            do! publish "inventory" key (Encode.command command |> Encode.toString 4)
+            do! environment.Publish "inventory" key (Encode.command command |> Encode.toString 4)
         }
 
     let handleReply (reply: Reply) =
         task {
-            logger.LogInformation "Getting saga for reply"
+            environment.Logger.LogInformation "Getting saga from reply"
 
-            let! saga = Database.get connection reply.SagaId
+            let! saga = Database.get environment.Connection reply.SagaId
 
             match saga with
             | None -> ()
@@ -116,9 +96,9 @@ type Worker
                   State = Pending
                   Order = order }
 
-            logger.LogInformation "Creating Saga"
+            environment.Logger.LogInformation "Creating Saga"
 
-            do! Database.create connection saga
+            do! Database.create environment.Connection saga
 
             let order = saga.Order
 
@@ -131,9 +111,9 @@ type Worker
 
             let key = order.OrderId.ToString()
 
-            logger.LogInformation("Starting Saga {sagaId}", saga.SagaId)
+            environment.Logger.LogInformation("Starting Saga {sagaId}", saga.SagaId)
 
-            do! publish "inventory" key (Encode.command command |> Encode.toString 4)
+            do! environment.Publish "inventory" key (Encode.command command |> Encode.toString 4)
         }
 
     let handleMessage (topic: string) (message: string) =
@@ -143,29 +123,29 @@ type Worker
 
                 match order with
                 | Ok order ->
-                    logger.LogInformation("Order {id} received", order.OrderId)
+                    environment.Logger.LogInformation("Order {id} received", order.OrderId)
 
                     do! startSaga order
-                | Error e -> logger.LogInformation e
+                | Error e -> environment.Logger.LogError e
             else
                 let reply = Decode.fromString Decode.reply message
 
                 match reply with
                 | Ok reply ->
-                    logger.LogInformation("Received {type} reply", reply.Type)
+                    environment.Logger.LogInformation("Received {type} reply", reply.Type)
 
                     do! handleReply reply
-                | Error e -> logger.LogInformation e
+                | Error e -> environment.Logger.LogError e
         }
 
     override _.ExecuteAsync(ct: CancellationToken) =
         task {
             while not ct.IsCancellationRequested do
-                logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now)
+                environment.Logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now)
 
-                let result = consumer.Consume ct
+                let result = environment.Consumer.Consume ct
 
-                logger.LogInformation("Message received {message}", result.Message.Value)
+                environment.Logger.LogInformation("Message received {message}", result.Message.Value)
 
                 handleMessage result.Topic result.Message.Value |> ignore
         }

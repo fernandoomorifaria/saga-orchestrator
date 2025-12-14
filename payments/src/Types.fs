@@ -2,7 +2,9 @@ module Types
 
 open System
 open System.Data
+open System.Threading.Tasks
 open Confluent.Kafka
+open Microsoft.Extensions.Logging
 
 type ReplyType =
     | PaymentProcessed
@@ -26,6 +28,7 @@ type WalletEntity =
       Balance: decimal }
 
 type Environment =
-    { Producer: IProducer<string, string>
+    { Publish: string -> string -> string -> Task<unit>
       Consumer: IConsumer<string, string>
-      Connection: IDbConnection }
+      Connection: IDbConnection
+      Logger: ILogger }

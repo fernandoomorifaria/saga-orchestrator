@@ -1,6 +1,16 @@
 module Types
 
 open System
+open System.Data
+open System.Threading.Tasks
+open Microsoft.Extensions.Logging
+open Confluent.Kafka
+
+type Environment =
+    { Publish: string -> string -> string -> Task<unit>
+      Consumer: IConsumer<string, string>
+      Connection: IDbConnection
+      Logger: ILogger }
 
 type Order =
     { OrderId: Guid
